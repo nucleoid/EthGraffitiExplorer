@@ -501,7 +501,59 @@ http {
 }
 EOF
 
-cat > $INSTALL_DIR/nginx-site.conf <<EOF
+# Create nginx config based on whether SSL is available
+if [ -z "$DOMAIN_NAME" ] || [ ! -d "/etc/letsencrypt/live/${DOMAIN_NAME}" ]; then
+    echo_info "Creating HTTP-only nginx configuration..."
+    cat > $INSTALL_DIR/nginx-site.conf <<'EOF'
+# HTTP Only Server (no SSL)
+server {
+    listen 80;
+    server_name _;
+
+    # API Proxy
+    location /api/ {
+        proxy_pass http://api:80/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection keep-alive;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_buffering off;
+    }
+
+    # Swagger UI
+    location /swagger/ {
+        proxy_pass http://api:80/swagger/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Web UI
+    location / {
+        proxy_pass http://web:80/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_connection;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        
+        # WebSocket support for Blazor Server
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+    }
+}
+EOF
+else
+    cat > $INSTALL_DIR/nginx-site.conf <<EOF
 # Redirect HTTP to HTTPS
 server {
     listen 80;
@@ -576,6 +628,7 @@ server {
     }
 }
 EOF
+fi
 
 echo_success "Nginx configuration created"
 
@@ -729,16 +782,61 @@ mkdir -p /var/www/certbot
 if [ ! -z "$DOMAIN_NAME" ] && [ ! -z "$SSL_EMAIL" ]; then
     echo_info "Obtaining SSL certificate for ${DOMAIN_NAME}..."
     
-    certbot certonly --standalone \
-        --non-interactive \
-        --agree-tos \
-        --email ${SSL_EMAIL} \
-        -d ${DOMAIN_NAME} || echo_warning "SSL certificate generation failed. You can run it manually later."
+    # Check if certificate already exists
+    if [ -d "/etc/letsencrypt/live/${DOMAIN_NAME}" ]; then
+        echo_success "SSL certificate already exists for ${DOMAIN_NAME}"
+    else
+        # Try webroot method first (doesn't require stopping nginx)
+        echo_info "Attempting webroot method (no port conflict)..."
+        mkdir -p /var/www/certbot
+        
+        if certbot certonly --webroot \
+            -w /var/www/certbot \
+            --non-interactive \
+            --agree-tos \
+            --email ${SSL_EMAIL} \
+            -d ${DOMAIN_NAME} 2>/dev/null; then
+            echo_success "SSL certificate obtained via webroot method"
+        else
+            echo_warning "Webroot method failed. Trying standalone method..."
+            echo_info "This requires stopping the service using port 80..."
+            
+            # Find and stop the service using port 80
+            PORT80_CONTAINER=$(docker ps --format '{{.Names}}' | xargs -I {} sh -c 'docker port {} 2>/dev/null | grep -q "^80/tcp" && echo {}' | head -1)
+            
+            if [ ! -z "$PORT80_CONTAINER" ]; then
+                echo_info "Temporarily stopping container: $PORT80_CONTAINER"
+                docker stop $PORT80_CONTAINER
+                
+                # Try standalone method
+                if certbot certonly --standalone \
+                    --non-interactive \
+                    --agree-tos \
+                    --email ${SSL_EMAIL} \
+                    -d ${DOMAIN_NAME}; then
+                    echo_success "SSL certificate obtained via standalone method"
+                else
+                    echo_error "SSL certificate generation failed"
+                fi
+                
+                # Restart the container
+                echo_info "Restarting container: $PORT80_CONTAINER"
+                docker start $PORT80_CONTAINER
+            else
+                echo_warning "Could not obtain SSL certificate automatically"
+                echo_info "You can try manually:"
+                echo_info "  sudo systemctl stop nginx  # or your web server"
+                echo_info "  sudo certbot certonly --standalone -d ${DOMAIN_NAME}"
+                echo_info "  sudo systemctl start nginx"
+            fi
+        fi
+    fi
     
     # Setup auto-renewal
-    (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && docker restart eth-graffiti-nginx") | crontab -
-    
-    echo_success "SSL certificate obtained and auto-renewal configured"
+    if [ -d "/etc/letsencrypt/live/${DOMAIN_NAME}" ]; then
+        (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 3 * * * certbot renew --quiet --deploy-hook 'docker restart eth-graffiti-nginx'") | crontab -
+        echo_success "SSL certificate auto-renewal configured"
+    fi
 else
     echo_warning "Skipping SSL certificate setup. Configure manually if needed."
 fi
@@ -751,17 +849,36 @@ echo_info "Step 13: Cloning repository and preparing build..."
 
 cd $INSTALL_DIR
 
-# If repository already exists, update it
-if [ -d ".git" ]; then
-    echo_info "Repository already exists, pulling latest changes..."
-    git pull
+# Check if directory has files
+if [ "$(ls -A $INSTALL_DIR)" ]; then
+    echo_info "Installation directory not empty, checking for git repository..."
+    
+    # If repository already exists, update it
+    if [ -d ".git" ]; then
+        echo_info "Git repository found, pulling latest changes..."
+        git pull || echo_warning "Could not pull latest changes, using existing code"
+    else
+        echo_warning "Directory contains files but no git repository"
+        echo_info "Using existing files in $INSTALL_DIR"
+    fi
 else
     echo_info "Cloning repository..."
-    git clone https://github.com/nucleoid/EthGraffitiExplorer.git .
+    git clone https://github.com/nucleoid/EthGraffitiExplorer.git . || {
+        echo_error "Failed to clone repository"
+        echo_info "You can manually clone it:"
+        echo_info "  cd $INSTALL_DIR"
+        echo_info "  git clone https://github.com/nucleoid/EthGraffitiExplorer.git ."
+        exit 1
+    }
 fi
 
-# Copy SQL schema to installation directory
-cp EthGraffitiExplorer.Core/Database/SqlServer_Schema.sql .
+# Check if SQL schema exists and copy it
+if [ -f "EthGraffitiExplorer.Core/Database/SqlServer_Schema.sql" ]; then
+    cp EthGraffitiExplorer.Core/Database/SqlServer_Schema.sql . || echo_warning "Could not copy SQL schema"
+    echo_success "SQL schema prepared"
+else
+    echo_warning "SQL schema file not found, you may need to create it manually"
+fi
 
 echo_success "Repository prepared"
 
@@ -870,9 +987,24 @@ echo "  Update:  ${INSTALL_DIR}/update.sh"
 echo "  Backup:  ${INSTALL_DIR}/backup.sh"
 echo ""
 echo_info "Service URLs:"
-echo "  Web UI:  https://${DOMAIN_NAME}"
-echo "  API:     https://${DOMAIN_NAME}/api"
-echo "  Swagger: https://${DOMAIN_NAME}/swagger"
+if [ -d "/etc/letsencrypt/live/${DOMAIN_NAME}" ] && [ ! -z "$DOMAIN_NAME" ]; then
+    echo "  Web UI:  https://${DOMAIN_NAME}"
+    echo "  API:     https://${DOMAIN_NAME}/api"
+    echo "  Swagger: https://${DOMAIN_NAME}/swagger"
+else
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    echo "  Web UI:  http://${SERVER_IP} (or http://localhost)"
+    echo "  API:     http://${SERVER_IP}/api"
+    echo "  Swagger: http://${SERVER_IP}/swagger"
+    if [ ! -z "$DOMAIN_NAME" ]; then
+        echo ""
+        echo_warning "SSL not configured. To add SSL later:"
+        echo "  1. Ensure ${DOMAIN_NAME} points to this server"
+        echo "  2. Temporarily stop nginx: docker stop eth-graffiti-nginx"
+        echo "  3. Get certificate: sudo certbot certonly --standalone -d ${DOMAIN_NAME}"
+        echo "  4. Update nginx config and restart: docker restart eth-graffiti-nginx"
+    fi
+fi
 echo ""
 echo_info "Database Connections (localhost only):"
 echo "  MongoDB: mongodb://admin:${MONGO_PASSWORD}@localhost:27017"
