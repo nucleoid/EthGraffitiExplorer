@@ -1,0 +1,135 @@
+﻿@page "/"
+@using EthGraffitiExplorer.Web.Services
+@inject GraffitiApiClient ApiClient
+
+<PageTitle>ETH Graffiti Explorer</PageTitle>
+
+<div class="container mt-5">
+    <div class="text-center mb-5">
+        <h1 class="display-4">
+            <i class="bi bi-search"></i> Ethereum Validator Graffiti Explorer
+        </h1>
+        <p class="lead">Explore and search graffiti messages from Ethereum validators</p>
+    </div>
+
+    <div class="row g-4 mb-5">
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="bi bi-collection display-1 text-primary"></i>
+                    <h5 class="card-title mt-3">Browse Graffiti</h5>
+                    <p class="card-text">Explore recent graffiti messages from validators</p>
+                    <a href="/graffiti" class="btn btn-primary">Browse Now</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="bi bi-graph-up display-1 text-success"></i>
+                    <h5 class="card-title mt-3">Statistics</h5>
+                    <p class="card-text">View top graffiti and usage statistics</p>
+                    @if (totalCount > 0)
+                    {
+                        <p class="h4 text-success">@totalCount.ToString("N0") graffiti</p>
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="bi bi-clock-history display-1 text-info"></i>
+                    <h5 class="card-title mt-3">Live Data</h5>
+                    <p class="card-text">Real-time data from your beacon node</p>
+                    @if (currentSlot > 0)
+                    {
+                        <p class="small">Current Slot: <code>@currentSlot</code></p>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header bg-dark text-white">
+            <h5 class="mb-0">Recent Graffiti</h5>
+        </div>
+        <div class="card-body">
+            @if (loading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            }
+            else if (recentGraffiti != null && recentGraffiti.Any())
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Slot</th>
+                                <th>Validator</th>
+                                <th>Graffiti</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var graffiti in recentGraffiti.Take(10))
+                            {
+                                <tr>
+                                    <td><code>@graffiti.Slot</code></td>
+                                    <td><a href="/validator/@graffiti.ValidatorIndex">@graffiti.ValidatorIndex</a></td>
+                                    <td>
+                                        <span class="badge bg-light text-dark">@graffiti.DecodedGraffiti</span>
+                                    </td>
+                                    <td>@graffiti.Timestamp.ToString("yyyy-MM-dd HH:mm")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-center mt-3">
+                    <a href="/graffiti" class="btn btn-outline-primary">View All</a>
+                </div>
+            }
+            else
+            {
+                <p class="text-center text-muted py-4">No graffiti data available yet. Configure your beacon node connection.</p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Core.DTOs.GraffitiDto>? recentGraffiti;
+    private bool loading = true;
+    private int totalCount = 0;
+    private long currentSlot = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardData();
+    }
+
+    private async Task LoadDashboardData()
+    {
+        loading = true;
+        try
+        {
+            recentGraffiti = await ApiClient.GetRecentGraffitiAsync(10);
+            totalCount = await ApiClient.GetGraffitiCountAsync();
+            currentSlot = await ApiClient.GetCurrentSlotAsync();
+        }
+        catch
+        {
+            // Handle errors gracefully
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+}

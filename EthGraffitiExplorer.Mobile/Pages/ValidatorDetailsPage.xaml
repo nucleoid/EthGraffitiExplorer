@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="EthGraffitiExplorer.Mobile.Pages.ValidatorDetailsPage"
+             Title="Validator Details">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="20">
+            <ActivityIndicator 
+                IsRunning="{Binding IsLoading}"
+                IsVisible="{Binding IsLoading}"
+                Color="{StaticResource Primary}" />
+
+            <VerticalStackLayout 
+                IsVisible="{Binding IsLoaded}"
+                Spacing="15">
+                
+                <Label 
+                    Text="{Binding Validator.ValidatorIndex, StringFormat='Validator {0}'}"
+                    FontSize="24"
+                    FontAttributes="Bold"
+                    HorizontalOptions="Center" />
+
+                <Frame BorderColor="LightGray" CornerRadius="10" Padding="15">
+                    <VerticalStackLayout Spacing="10">
+                        <Label Text="Status" FontAttributes="Bold" />
+                        <Label Text="{Binding StatusText}" TextColor="{Binding StatusColor}" />
+
+                        <Label Text="Public Key" FontAttributes="Bold" Margin="0,10,0,0" />
+                        <Label 
+                            Text="{Binding Validator.Pubkey}" 
+                            FontFamily="Courier"
+                            FontSize="10"
+                            LineBreakMode="CharacterWrap" />
+
+                        <Label Text="Effective Balance" FontAttributes="Bold" Margin="0,10,0,0" />
+                        <Label Text="{Binding BalanceText}" />
+
+                        <Label Text="Total Graffiti" FontAttributes="Bold" Margin="0,10,0,0" />
+                        <Label Text="{Binding Validator.GraffitiCount}" />
+                    </VerticalStackLayout>
+                </Frame>
+
+                <Button 
+                    Text="Back"
+                    Clicked="OnBackClicked"
+                    BackgroundColor="Gray" />
+            </VerticalStackLayout>
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

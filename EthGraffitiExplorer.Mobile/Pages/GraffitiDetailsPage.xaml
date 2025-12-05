@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="EthGraffitiExplorer.Mobile.Pages.GraffitiDetailsPage"
+             Title="Graffiti Details">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="20">
+            <ActivityIndicator 
+                IsRunning="{Binding IsLoading}"
+                IsVisible="{Binding IsLoading}"
+                Color="{StaticResource Primary}" />
+
+            <VerticalStackLayout 
+                IsVisible="{Binding IsLoaded}"
+                Spacing="15">
+                
+                <Label 
+                    Text="Graffiti Details"
+                    FontSize="24"
+                    FontAttributes="Bold"
+                    HorizontalOptions="Center" />
+
+                <Frame BorderColor="LightGray" CornerRadius="10" Padding="15">
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="120,*" RowSpacing="10">
+                        <Label Grid.Row="0" Grid.Column="0" Text="Slot:" FontAttributes="Bold" />
+                        <Label Grid.Row="0" Grid.Column="1" Text="{Binding Graffiti.Slot}" FontFamily="Courier" />
+
+                        <Label Grid.Row="1" Grid.Column="0" Text="Epoch:" FontAttributes="Bold" />
+                        <Label Grid.Row="1" Grid.Column="1" Text="{Binding Graffiti.Epoch}" />
+
+                        <Label Grid.Row="2" Grid.Column="0" Text="Validator:" FontAttributes="Bold" />
+                        <Label Grid.Row="2" Grid.Column="1" Text="{Binding Graffiti.ValidatorIndex}" />
+
+                        <Label Grid.Row="3" Grid.Column="0" Text="Block Hash:" FontAttributes="Bold" />
+                        <Label Grid.Row="3" Grid.Column="1" Text="{Binding Graffiti.BlockHash}" FontFamily="Courier" FontSize="10" LineBreakMode="CharacterWrap" />
+
+                        <Label Grid.Row="4" Grid.Column="0" Text="Timestamp:" FontAttributes="Bold" />
+                        <Label Grid.Row="4" Grid.Column="1" Text="{Binding Graffiti.Timestamp, StringFormat='{0:yyyy-MM-dd HH:mm:ss UTC}'}" />
+
+                        <Label Grid.Row="5" Grid.Column="0" Text="Block Number:" FontAttributes="Bold" />
+                        <Label Grid.Row="5" Grid.Column="1" Text="{Binding Graffiti.BlockNumber}" />
+                    </Grid>
+                </Frame>
+
+                <Frame BorderColor="{StaticResource Primary}" CornerRadius="10" Padding="15">
+                    <VerticalStackLayout Spacing="10">
+                        <Label Text="Decoded Graffiti" FontSize="18" FontAttributes="Bold" />
+                        <Label 
+                            Text="{Binding Graffiti.DecodedGraffiti}"
+                            FontSize="16"
+                            TextColor="{StaticResource Primary}"
+                            LineBreakMode="WordWrap" />
+                    </VerticalStackLayout>
+                </Frame>
+
+                <Frame BorderColor="LightGray" CornerRadius="10" Padding="15">
+                    <VerticalStackLayout Spacing="10">
+                        <Label Text="Raw Graffiti (Hex)" FontSize="14" FontAttributes="Bold" />
+                        <Label 
+                            Text="{Binding Graffiti.RawGraffiti}"
+                            FontFamily="Courier"
+                            FontSize="12"
+                            LineBreakMode="CharacterWrap" />
+                    </VerticalStackLayout>
+                </Frame>
+
+                <Button 
+                    Text="View Validator Details"
+                    Clicked="OnViewValidatorClicked"
+                    BackgroundColor="{StaticResource Primary}" />
+
+                <Button 
+                    Text="Back to List"
+                    Clicked="OnBackClicked"
+                    BackgroundColor="Gray" />
+            </VerticalStackLayout>
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

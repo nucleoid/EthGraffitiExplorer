@@ -1,0 +1,6 @@
+@EthGraffitiExplorer_HostAddress = http://localhost:5124
+
+GET {{EthGraffitiExplorer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

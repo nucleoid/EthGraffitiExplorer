@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="EthGraffitiExplorer.Mobile.Pages.GraffitiListPage"
+             Title="Graffiti Explorer">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="15">
+            <Label 
+                Text="ETH Validator Graffiti"
+                FontSize="28"
+                FontAttributes="Bold"
+                HorizontalOptions="Center" />
+
+            <Frame BorderColor="LightGray" CornerRadius="10" Padding="15">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Search" FontSize="18" FontAttributes="Bold" />
+                    
+                    <Entry 
+                        x:Name="SearchEntry"
+                        Placeholder="Search graffiti..."
+                        Text="{Binding SearchTerm}" />
+                    
+                    <Entry 
+                        x:Name="ValidatorIndexEntry"
+                        Placeholder="Validator Index (optional)"
+                        Keyboard="Numeric"
+                        Text="{Binding ValidatorIndexText}" />
+                    
+                    <Button 
+                        Text="Search"
+                        Clicked="OnSearchClicked"
+                        BackgroundColor="{StaticResource Primary}" />
+                </VerticalStackLayout>
+            </Frame>
+
+            <ActivityIndicator 
+                IsRunning="{Binding IsLoading}"
+                IsVisible="{Binding IsLoading}"
+                Color="{StaticResource Primary}" />
+
+            <CollectionView 
+                ItemsSource="{Binding Graffitis}"
+                SelectionMode="Single"
+                SelectionChanged="OnGraffitiSelected">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame 
+                            Margin="0,5"
+                            BorderColor="LightGray"
+                            CornerRadius="8"
+                            Padding="10">
+                            <VerticalStackLayout Spacing="5">
+                                <HorizontalStackLayout Spacing="10">
+                                    <Label 
+                                        Text="Slot:"
+                                        FontAttributes="Bold" />
+                                    <Label 
+                                        Text="{Binding Slot}"
+                                        FontFamily="Courier" />
+                                </HorizontalStackLayout>
+
+                                <HorizontalStackLayout Spacing="10">
+                                    <Label 
+                                        Text="Validator:"
+                                        FontAttributes="Bold" />
+                                    <Label 
+                                        Text="{Binding ValidatorIndex}" />
+                                </HorizontalStackLayout>
+
+                                <Label 
+                                    Text="{Binding DecodedGraffiti}"
+                                    FontSize="16"
+                                    TextColor="{StaticResource Primary}"
+                                    LineBreakMode="TailTruncation" />
+
+                                <Label 
+                                    Text="{Binding Timestamp, StringFormat='{0:yyyy-MM-dd HH:mm:ss}'}"
+                                    FontSize="12"
+                                    TextColor="Gray" />
+                            </VerticalStackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <Label 
+                Text="No graffiti found"
+                IsVisible="{Binding IsEmpty}"
+                HorizontalOptions="Center"
+                TextColor="Gray"
+                Margin="0,20" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
