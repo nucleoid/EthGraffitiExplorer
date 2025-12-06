@@ -438,8 +438,6 @@ else
 fi
 
 cat > $INSTALL_DIR/docker-compose.yml <<EOF
-version: '3.8'
-
 services:
   # MongoDB - Graffiti Storage
   mongodb:
@@ -462,6 +460,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 40s
 
   # SQL Server - Relational Data
   sqlserver:
@@ -472,6 +471,7 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${SQL_PASSWORD}
       MSSQL_PID: "Express"
+      MSSQL_ENABLE_HADR: 0
     ports:
       - "127.0.0.1:1433:1433"
     volumes:
@@ -479,10 +479,11 @@ services:
     networks:
       - eth-graffiti-net
     healthcheck:
-      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${SQL_PASSWORD}" -Q "SELECT 1" || exit 1
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "\${MSSQL_SA_PASSWORD}" -Q "SELECT 1" -C || exit 1
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   # API Service
   api:
@@ -494,7 +495,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:80
-      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=EthGraffitiExplorer;User Id=sa;Password=${SQL_PASSWORD};TrustServerCertificate=true;MultipleActiveResultSets=true"
+      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=EthGraffitiExplorer;User Id=sa;Password=${SQL_PASSWORD};TrustServerCertificate=true;MultipleActiveResultSets=true;Encrypt=false"
       MongoDB__ConnectionString: "mongodb://admin:${MONGO_PASSWORD}@mongodb:27017"
       MongoDB__DatabaseName: "EthGraffitiExplorer"
       MongoDB__GraffitiCollectionName: "graffiti"
