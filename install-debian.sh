@@ -74,8 +74,32 @@ echo ""
 # Get configuration from user
 read -p "Enter your domain name (e.g., graffiti.yourdomain.com) or press Enter to skip SSL: " DOMAIN_NAME
 read -p "Enter your email for SSL certificates: " SSL_EMAIL
-read -p "Enter Lodestar beacon node RPC URL [http://localhost:9596]: " BEACON_RPC_URL
-BEACON_RPC_URL=${BEACON_RPC_URL:-http://localhost:9596}
+
+# Smart beacon node URL detection
+echo ""
+echo_info "Detecting Lodestar beacon node..."
+SUGGESTED_BEACON_URL=""
+if docker ps --format '{{.Names}}' | grep -q "lodestar"; then
+    LODESTAR_IP=$(docker inspect $(docker ps --format '{{.Names}}' | grep lodestar | head -1) 2>/dev/null | grep -A 10 "dncore_network" | grep "IPv4Address" | cut -d'"' -f4 | cut -d'/' -f1)
+    if [ ! -z "$LODESTAR_IP" ]; then
+        SUGGESTED_BEACON_URL="http://${LODESTAR_IP}:9596"
+        echo_success "Found Lodestar at: $SUGGESTED_BEACON_URL"
+    fi
+fi
+
+if [ -z "$SUGGESTED_BEACON_URL" ]; then
+    # Try common DAppNode patterns
+    if curl -s -m 2 http://lodestar.dappnode:9596/eth/v1/node/version &>/dev/null; then
+        SUGGESTED_BEACON_URL="http://lodestar.dappnode:9596"
+    elif curl -s -m 2 http://172.33.1.5:9596/eth/v1/node/version &>/dev/null; then
+        SUGGESTED_BEACON_URL="http://172.33.1.5:9596"
+    else
+        SUGGESTED_BEACON_URL="http://localhost:5052"
+    fi
+fi
+
+read -p "Enter Lodestar beacon node RPC URL [$SUGGESTED_BEACON_URL]: " BEACON_RPC_URL
+BEACON_RPC_URL=${BEACON_RPC_URL:-$SUGGESTED_BEACON_URL}
 
 read -sp "Enter SQL Server SA password (strong password required): " SQL_PASSWORD
 echo ""
@@ -848,6 +872,11 @@ fi
 EOF
 chmod +x $INSTALL_DIR/logs.sh
 
+# Make fix-beacon-url.sh executable if it exists
+if [ -f "$INSTALL_DIR/fix-beacon-url.sh" ]; then
+    chmod +x $INSTALL_DIR/fix-beacon-url.sh
+fi
+
 echo_success "Management scripts created"
 
 ################################################################################
@@ -1097,9 +1126,16 @@ echo ""
 echo_warning "Next Steps:"
 echo "  1. Verify services are running: ${INSTALL_DIR}/status.sh"
 echo "  2. Check API health: curl http://localhost:8080/health"
-echo "  3. Access the web UI in your browser at http://localhost:8080"
-echo "  4. Trigger initial sync: curl -X POST http://localhost:8080/api/beacon/sync"
-echo "  5. Monitor logs: ${INSTALL_DIR}/logs.sh"
+if [ "$BEACON_RPC_URL" = "http://localhost:5052" ] || [ "$BEACON_RPC_URL" = "http://localhost:9596" ]; then
+    echo "  3. FIX BEACON URL: ${INSTALL_DIR}/fix-beacon-url.sh (IMPORTANT!)"
+    echo "  4. Access the web UI: http://localhost:8080"
+    echo "  5. Trigger initial sync: curl -X POST http://localhost:8080/api/beacon/sync"
+else
+    echo "  3. Access the web UI: http://localhost:8080"
+    echo "  4. Trigger initial sync: curl -X POST http://localhost:8080/api/beacon/sync"
+    echo "  5. Monitor logs: ${INSTALL_DIR}/logs.sh"
+fi
+echo "  6. Monitor logs: ${INSTALL_DIR}/logs.sh"
 echo ""
 echo_info "Data is stored in: ${DATA_DIR}"
 echo_info "Configuration is in: ${INSTALL_DIR}"
