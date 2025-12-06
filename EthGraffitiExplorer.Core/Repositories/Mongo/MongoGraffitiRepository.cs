@@ -1,5 +1,4 @@
 using MongoDB.Driver;
-using MongoDB.Driver.Linq;
 using EthGraffitiExplorer.Core.Data;
 using EthGraffitiExplorer.Core.Models.Mongo;
 using EthGraffitiExplorer.Core.DTOs;
@@ -8,22 +7,15 @@ using EthGraffitiExplorer.Core.Models;
 
 namespace EthGraffitiExplorer.Core.Repositories.Mongo;
 
-public class MongoGraffitiRepository : IGraffitiRepository
+public class MongoGraffitiRepository(MongoDbContext context) : IGraffitiRepository
 {
-    private readonly MongoDbContext _context;
-    private readonly IMongoCollection<GraffitiDocument> _collection;
-
-    public MongoGraffitiRepository(MongoDbContext context)
-    {
-        _context = context;
-        _collection = context.Graffiti;
-    }
+    private readonly IMongoCollection<GraffitiDocument> _collection = context.Graffiti;
 
     public async Task<ValidatorGraffiti?> GetByIdAsync(int id)
     {
         // MongoDB uses ObjectId, but we'll search by internal numeric ID if stored
         // For this implementation, we'll use the MongoDB _id as string
-        return null; // This method is less relevant with MongoDB's ObjectId
+        return await Task.FromResult<ValidatorGraffiti?>(null); // This method is less relevant with MongoDB's ObjectId
     }
 
     public async Task<ValidatorGraffiti?> GetByMongoIdAsync(string id)

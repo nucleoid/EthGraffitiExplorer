@@ -6,7 +6,7 @@ using EthGraffitiExplorer.Mobile.Services;
 namespace EthGraffitiExplorer.Mobile.Pages;
 
 [QueryProperty(nameof(ValidatorIndex), "validatorIndex")]
-public partial class ValidatorDetailsPage : ContentPage, INotifyPropertyChanged
+public partial class ValidatorDetailsPage : INotifyPropertyChanged
 {
     private readonly GraffitiApiService _apiService;
     private bool _isLoading;
@@ -38,7 +38,7 @@ public partial class ValidatorDetailsPage : ContentPage, INotifyPropertyChanged
         {
             _validator = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(IsLoaded));
+            OnPropertyChanged(nameof(IsDataLoaded));
             OnPropertyChanged(nameof(StatusText));
             OnPropertyChanged(nameof(StatusColor));
             OnPropertyChanged(nameof(BalanceText));
@@ -52,11 +52,11 @@ public partial class ValidatorDetailsPage : ContentPage, INotifyPropertyChanged
         {
             _isLoading = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(IsLoaded));
+            OnPropertyChanged(nameof(IsDataLoaded));
         }
     }
 
-    public bool IsLoaded => !IsLoading && Validator != null;
+    public bool IsDataLoaded => !IsLoading && Validator != null;
 
     public string StatusText => Validator?.IsActive == true ? "Active" : "Inactive";
 

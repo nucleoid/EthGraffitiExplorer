@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="EthGraffitiExplorer.Web\**" />
+    <Compile Remove="EthGraffitiExplorer.Core\**" />
+    <EmbeddedResource Remove="EthGraffitiExplorer.Web\**" />
+    <EmbeddedResource Remove="EthGraffitiExplorer.Core\**" />
+    <None Remove="EthGraffitiExplorer.Web\**" />
+    <None Remove="EthGraffitiExplorer.Core\**" />
+    <Content Remove="EthGraffitiExplorer.Web\**" />
+    <Content Remove="EthGraffitiExplorer.Core\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <RazorComponent Remove="EthGraffitiExplorer.Web\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EthGraffitiExplorer.Core\EthGraffitiExplorer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -192,21 +192,250 @@ else
 fi
 
 # Check if DAppNode is running
+DAPPNODE_DETECTED=false
 if docker network ls | grep -q "dncore_network\|dappnode"; then
     echo_success "DAppNode network detected - will connect API container later"
     DAPPNODE_DETECTED=true
 else
     echo_warning "DAppNode network not detected. Will use host network for beacon node access."
-    DAPPNODE_DETECTED=false
 fi
 
 echo_success "Docker network setup completed"
 
 ################################################################################
-# Step 5: Create Docker Compose Configuration
+# Step 5: Clone Repository First
 ################################################################################
 
-echo_info "Step 5: Creating Docker Compose configuration..."
+echo_info "Step 5: Cloning repository..."
+
+cd $INSTALL_DIR
+
+# Check if directory has files
+if [ -d ".git" ]; then
+    echo_info "Git repository found, pulling latest changes..."
+    git pull || echo_warning "Could not pull latest changes, using existing code"
+elif [ "$(ls -A $INSTALL_DIR 2>/dev/null | grep -v lost+found)" ]; then
+    echo_warning "Directory contains files but no git repository"
+    read -p "Clear directory and clone fresh? (y/N): " CLEAR_DIR
+    if [[ "$CLEAR_DIR" =~ ^[Yy]$ ]]; then
+        find $INSTALL_DIR -mindepth 1 -not -name 'lost+found' -delete
+        git clone https://github.com/nucleoid/EthGraffitiExplorer.git . || {
+            echo_error "Failed to clone repository"
+            exit 1
+        }
+    else
+        echo_info "Using existing files in $INSTALL_DIR"
+    fi
+else
+    echo_info "Cloning repository..."
+    git clone https://github.com/nucleoid/EthGraffitiExplorer.git . || {
+        echo_error "Failed to clone repository"
+        echo_info "You can manually clone it:"
+        echo_info "  cd $INSTALL_DIR"
+        echo_info "  git clone https://github.com/nucleoid/EthGraffitiExplorer.git ."
+        exit 1
+    }
+fi
+
+echo_success "Repository prepared"
+
+################################################################################
+# Step 6: Create Dockerfiles
+################################################################################
+
+echo_info "Step 6: Creating Dockerfiles..."
+
+# API Dockerfile
+cat > $INSTALL_DIR/Dockerfile.api <<'EOF'
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+WORKDIR /app
+EXPOSE 80
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy solution file
+COPY ["EthGraffitiExplorer.sln", "./"]
+
+# Copy all project files
+COPY ["EthGraffitiExplorer.Api/EthGraffitiExplorer.Api.csproj", "EthGraffitiExplorer.Api/"]
+COPY ["EthGraffitiExplorer.Core/EthGraffitiExplorer.Core.csproj", "EthGraffitiExplorer.Core/"]
+
+# Restore dependencies
+RUN dotnet restore "EthGraffitiExplorer.Api/EthGraffitiExplorer.Api.csproj"
+
+# Copy all source code
+COPY . .
+
+# Build
+WORKDIR "/src/EthGraffitiExplorer.Api"
+RUN dotnet build "EthGraffitiExplorer.Api.csproj" -c Release -o /app/build
+
+FROM build AS publish
+RUN dotnet publish "EthGraffitiExplorer.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT ["dotnet", "EthGraffitiExplorer.Api.dll"]
+EOF
+
+# Web Dockerfile
+cat > $INSTALL_DIR/Dockerfile.web <<'EOF'
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+WORKDIR /app
+EXPOSE 80
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy solution file
+COPY ["EthGraffitiExplorer.sln", "./"]
+
+# Copy all project files
+COPY ["EthGraffitiExplorer.Web/EthGraffitiExplorer.Web.csproj", "EthGraffitiExplorer.Web/"]
+COPY ["EthGraffitiExplorer.Core/EthGraffitiExplorer.Core.csproj", "EthGraffitiExplorer.Core/"]
+
+# Restore dependencies
+RUN dotnet restore "EthGraffitiExplorer.Web/EthGraffitiExplorer.Web.csproj"
+
+# Copy all source code
+COPY . .
+
+# Build
+WORKDIR "/src/EthGraffitiExplorer.Web"
+RUN dotnet build "EthGraffitiExplorer.Web.csproj" -c Release -o /app/build
+
+FROM build AS publish
+RUN dotnet publish "EthGraffitiExplorer.Web.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+
+ENTRYPOINT ["dotnet", "EthGraffitiExplorer.Web.dll"]
+EOF
+
+echo_success "Dockerfiles created"
+
+################################################################################
+# Step 7: Create MongoDB Initialization Script
+################################################################################
+
+echo_info "Step 7: Creating MongoDB initialization script..."
+
+cat > $INSTALL_DIR/mongo-init.js <<EOF
+// MongoDB initialization script for ETH Graffiti Explorer
+
+db = db.getSiblingDB('EthGraffitiExplorer');
+
+// Create graffiti collection with schema validation
+db.createCollection('graffiti', {
+  validator: {
+    \$jsonSchema: {
+      bsonType: 'object',
+      required: ['slot', 'blockHash', 'validatorIndex', 'timestamp'],
+      properties: {
+        slot: { bsonType: 'long' },
+        epoch: { bsonType: 'long' },
+        blockNumber: { bsonType: 'long' },
+        blockHash: { bsonType: 'string' },
+        validatorIndex: { bsonType: 'int' },
+        rawGraffiti: { bsonType: 'string' },
+        decodedGraffiti: { bsonType: 'string' },
+        timestamp: { bsonType: 'date' },
+        proposerPubkey: { bsonType: 'string' },
+        createdAt: { bsonType: 'date' }
+      }
+    }
+  }
+});
+
+// Create indexes
+db.graffiti.createIndex({ slot: 1 }, { unique: true });
+db.graffiti.createIndex({ validatorIndex: 1 });
+db.graffiti.createIndex({ blockHash: 1 }, { unique: true });
+db.graffiti.createIndex({ timestamp: -1 });
+db.graffiti.createIndex({ decodedGraffiti: 'text' });
+db.graffiti.createIndex({ validatorIndex: 1, timestamp: -1 });
+
+print('MongoDB initialization completed successfully');
+EOF
+
+echo_success "MongoDB initialization script created"
+
+################################################################################
+# Step 8: Prepare SQL Schema
+################################################################################
+
+echo_info "Step 8: Preparing SQL Server schema..."
+
+# Find and copy SQL schema
+SQL_SCHEMA_SOURCES=(
+    "EthGraffitiExplorer.Core/Database/SqlServer_Schema.sql"
+    "EthGraffitiExplorer.Core/SqlServer_Schema.sql"
+    "Database/SqlServer_Schema.sql"
+    "SqlServer_Schema.sql"
+)
+
+SQL_SCHEMA_FOUND=false
+for source in "${SQL_SCHEMA_SOURCES[@]}"; do
+    if [ -f "$source" ]; then
+        cp "$source" $INSTALL_DIR/SqlServer_Schema.sql
+        echo_success "SQL schema found and copied from $source"
+        SQL_SCHEMA_FOUND=true
+        break
+    fi
+done
+
+if [ "$SQL_SCHEMA_FOUND" = false ]; then
+    echo_warning "SQL schema file not found, creating basic schema..."
+    cat > $INSTALL_DIR/SqlServer_Schema.sql <<'EOF'
+-- ETH Graffiti Explorer Database Schema
+-- Basic schema - will be populated by EF migrations
+
+USE master;
+GO
+
+IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'EthGraffitiExplorer')
+BEGIN
+    CREATE DATABASE EthGraffitiExplorer;
+END
+GO
+
+USE EthGraffitiExplorer;
+GO
+
+-- The actual tables will be created by Entity Framework migrations
+-- This script just ensures the database exists
+EOF
+fi
+
+echo_success "SQL schema prepared"
+
+################################################################################
+# Step 9: Create Docker Compose Configuration
+################################################################################
+
+echo_info "Step 9: Creating Docker Compose configuration..."
+
+# Determine network configuration
+if [ "$DAPPNODE_DETECTED" = true ]; then
+    NETWORK_CONFIG="
+      - eth-graffiti-net
+      - dncore_network"
+    EXTRA_NETWORKS="
+  dncore_network:
+    external: true"
+else
+    NETWORK_CONFIG="
+      - eth-graffiti-net"
+    EXTRA_NETWORKS=""
+fi
 
 cat > $INSTALL_DIR/docker-compose.yml <<EOF
 version: '3.8'
@@ -247,7 +476,6 @@ services:
       - "127.0.0.1:1433:1433"
     volumes:
       - ${DATA_DIR}/sqlserver:/var/opt/mssql
-      - ./SqlServer_Schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     networks:
       - eth-graffiti-net
     healthcheck:
@@ -278,9 +506,7 @@ services:
         condition: service_healthy
       sqlserver:
         condition: service_healthy
-    networks:
-      - eth-graffiti-net
-      - dappnode_network
+    networks:${NETWORK_CONFIG}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -327,142 +553,17 @@ services:
 
 networks:
   eth-graffiti-net:
-    external: true
-  dappnode_network:
-    external: true
-    name: dncore_network
+    external: true${EXTRA_NETWORKS}
 
 EOF
 
 echo_success "Docker Compose configuration created"
 
 ################################################################################
-# Step 6: Create MongoDB Initialization Script
+# Step 10: Create Nginx Configuration
 ################################################################################
 
-echo_info "Step 6: Creating MongoDB initialization script..."
-
-cat > $INSTALL_DIR/mongo-init.js <<EOF
-// MongoDB initialization script for ETH Graffiti Explorer
-
-db = db.getSiblingDB('EthGraffitiExplorer');
-
-// Create graffiti collection with schema validation
-db.createCollection('graffiti', {
-  validator: {
-    \$jsonSchema: {
-      bsonType: 'object',
-      required: ['slot', 'blockHash', 'validatorIndex', 'timestamp'],
-      properties: {
-        slot: { bsonType: 'long' },
-        epoch: { bsonType: 'long' },
-        blockNumber: { bsonType: 'long' },
-        blockHash: { bsonType: 'string' },
-        validatorIndex: { bsonType: 'int' },
-        rawGraffiti: { bsonType: 'string' },
-        decodedGraffiti: { bsonType: 'string' },
-        timestamp: { bsonType: 'date' },
-        proposerPubkey: { bsonType: 'string' },
-        createdAt: { bsonType: 'date' }
-      }
-    }
-  }
-});
-
-// Create indexes
-db.graffiti.createIndex({ slot: 1 });
-db.graffiti.createIndex({ validatorIndex: 1 });
-db.graffiti.createIndex({ blockHash: 1 }, { unique: true });
-db.graffiti.createIndex({ timestamp: -1 });
-db.graffiti.createIndex({ decodedGraffiti: 'text' });
-db.graffiti.createIndex({ validatorIndex: 1, timestamp: -1 });
-
-print('MongoDB initialization completed successfully');
-EOF
-
-echo_success "MongoDB initialization script created"
-
-################################################################################
-# Step 7: Create Dockerfiles
-################################################################################
-
-echo_info "Step 7: Creating Dockerfiles..."
-
-# API Dockerfile
-cat > $INSTALL_DIR/Dockerfile.api <<'EOF'
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-WORKDIR /app
-EXPOSE 80
-
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
-
-# Copy project files
-COPY ["EthGraffitiExplorer.Api.csproj", "./"]
-COPY ["EthGraffitiExplorer.Core/EthGraffitiExplorer.Core.csproj", "EthGraffitiExplorer.Core/"]
-
-# Restore dependencies
-RUN dotnet restore "EthGraffitiExplorer.Api.csproj"
-
-# Copy source code
-COPY . .
-
-# Build
-RUN dotnet build "EthGraffitiExplorer.Api.csproj" -c Release -o /app/build
-
-FROM build AS publish
-RUN dotnet publish "EthGraffitiExplorer.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
-
-FROM base AS final
-WORKDIR /app
-COPY --from=publish /app/publish .
-
-# Install sqlcmd for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-ENTRYPOINT ["dotnet", "EthGraffitiExplorer.Api.dll"]
-EOF
-
-# Web Dockerfile
-cat > $INSTALL_DIR/Dockerfile.web <<'EOF'
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-WORKDIR /app
-EXPOSE 80
-
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
-
-# Copy project files
-COPY ["EthGraffitiExplorer.Web/EthGraffitiExplorer.Web.csproj", "EthGraffitiExplorer.Web/"]
-COPY ["EthGraffitiExplorer.Core/EthGraffitiExplorer.Core.csproj", "EthGraffitiExplorer.Core/"]
-
-# Restore dependencies
-RUN dotnet restore "EthGraffitiExplorer.Web/EthGraffitiExplorer.Web.csproj"
-
-# Copy source code
-COPY . .
-
-# Build
-WORKDIR "/src/EthGraffitiExplorer.Web"
-RUN dotnet build "EthGraffitiExplorer.Web.csproj" -c Release -o /app/build
-
-FROM build AS publish
-RUN dotnet publish "EthGraffitiExplorer.Web.csproj" -c Release -o /app/publish /p:UseAppHost=false
-
-FROM base AS final
-WORKDIR /app
-COPY --from=publish /app/publish .
-
-ENTRYPOINT ["dotnet", "EthGraffitiExplorer.Web.dll"]
-EOF
-
-echo_success "Dockerfiles created"
-
-################################################################################
-# Step 8: Create Nginx Configuration
-################################################################################
-
-echo_info "Step 8: Creating Nginx configuration..."
+echo_info "Step 10: Creating Nginx configuration..."
 
 cat > $INSTALL_DIR/nginx.conf <<'EOF'
 user nginx;
@@ -501,7 +602,7 @@ http {
 }
 EOF
 
-# Create nginx config based on whether SSL is available
+# Create nginx site config based on whether SSL is available
 if [ -z "$DOMAIN_NAME" ] || [ ! -d "/etc/letsencrypt/live/${DOMAIN_NAME}" ]; then
     echo_info "Creating HTTP-only nginx configuration..."
     cat > $INSTALL_DIR/nginx-site.conf <<'EOF'
@@ -633,10 +734,10 @@ fi
 echo_success "Nginx configuration created"
 
 ################################################################################
-# Step 9: Create Systemd Service
+# Step 11: Create Systemd Service
 ################################################################################
 
-echo_info "Step 9: Creating systemd service..."
+echo_info "Step 11: Creating systemd service..."
 
 cat > /etc/systemd/system/eth-graffiti-explorer.service <<EOF
 [Unit]
@@ -662,10 +763,14 @@ systemctl enable eth-graffiti-explorer.service
 echo_success "Systemd service created and enabled"
 
 ################################################################################
-# Step 10: Create Management Scripts
+# Step 12: Create Management Scripts
 ################################################################################
 
-echo_info "Step 10: Creating management scripts..."
+echo_info "Step 12: Creating management scripts..."
+
+# Create logs directory
+mkdir -p $INSTALL_DIR/logs/api
+mkdir -p $INSTALL_DIR/logs/web
 
 # Start script
 cat > $INSTALL_DIR/start.sh <<'EOF'
@@ -711,22 +816,22 @@ EOF
 chmod +x $INSTALL_DIR/update.sh
 
 # Backup script
-cat > $INSTALL_DIR/backup.sh <<'EOF'
+cat > $INSTALL_DIR/backup.sh <<EOF
 #!/bin/bash
 BACKUP_DIR="/backup/eth-graffiti-explorer"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+TIMESTAMP=\$(date +%Y%m%d_%H%M%S)
 
-mkdir -p $BACKUP_DIR
+mkdir -p \$BACKUP_DIR
 
 echo "Backing up MongoDB..."
 docker exec eth-graffiti-mongodb mongodump --out=/tmp/backup --quiet
-docker cp eth-graffiti-mongodb:/tmp/backup $BACKUP_DIR/mongodb_$TIMESTAMP
+docker cp eth-graffiti-mongodb:/tmp/backup \$BACKUP_DIR/mongodb_\$TIMESTAMP
 
 echo "Backing up SQL Server..."
-docker exec eth-graffiti-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$SQL_PASSWORD" -Q "BACKUP DATABASE EthGraffitiExplorer TO DISK = '/tmp/backup.bak'"
-docker cp eth-graffiti-sqlserver:/tmp/backup.bak $BACKUP_DIR/sqlserver_$TIMESTAMP.bak
+docker exec eth-graffiti-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${SQL_PASSWORD}" -Q "BACKUP DATABASE EthGraffitiExplorer TO DISK = '/tmp/backup.bak'"
+docker cp eth-graffiti-sqlserver:/tmp/backup.bak \$BACKUP_DIR/sqlserver_\$TIMESTAMP.bak
 
-echo "Backup completed: $BACKUP_DIR"
+echo "Backup completed: \$BACKUP_DIR"
 EOF
 chmod +x $INSTALL_DIR/backup.sh
 
@@ -745,10 +850,10 @@ chmod +x $INSTALL_DIR/logs.sh
 echo_success "Management scripts created"
 
 ################################################################################
-# Step 11: Create .env File
+# Step 13: Create .env File
 ################################################################################
 
-echo_info "Step 11: Creating environment configuration..."
+echo_info "Step 13: Creating environment configuration..."
 
 cat > $INSTALL_DIR/.env <<EOF
 # Database Passwords
@@ -770,10 +875,10 @@ chmod 600 $INSTALL_DIR/.env
 echo_success "Environment configuration created"
 
 ################################################################################
-# Step 12: SSL Certificate Setup
+# Step 14: SSL Certificate Setup
 ################################################################################
 
-echo_info "Step 12: Setting up SSL certificates..."
+echo_info "Step 14: Setting up SSL certificates..."
 
 # Create certbot directory
 mkdir -p /var/www/certbot
@@ -842,59 +947,29 @@ else
 fi
 
 ################################################################################
-# Step 13: Clone Repository and Build
+# Step 15: Start Services
 ################################################################################
 
-echo_info "Step 13: Cloning repository and preparing build..."
+echo_info "Step 15: Starting services..."
 
 cd $INSTALL_DIR
 
-# Check if directory has files
-if [ "$(ls -A $INSTALL_DIR)" ]; then
-    echo_info "Installation directory not empty, checking for git repository..."
-    
-    # If repository already exists, update it
-    if [ -d ".git" ]; then
-        echo_info "Git repository found, pulling latest changes..."
-        git pull || echo_warning "Could not pull latest changes, using existing code"
-    else
-        echo_warning "Directory contains files but no git repository"
-        echo_info "Using existing files in $INSTALL_DIR"
-    fi
-else
-    echo_info "Cloning repository..."
-    git clone https://github.com/nucleoid/EthGraffitiExplorer.git . || {
-        echo_error "Failed to clone repository"
-        echo_info "You can manually clone it:"
-        echo_info "  cd $INSTALL_DIR"
-        echo_info "  git clone https://github.com/nucleoid/EthGraffitiExplorer.git ."
-        exit 1
-    }
-fi
+# Build and start services
+echo_info "Building Docker images (this may take several minutes)..."
+docker compose build || {
+    echo_error "Docker build failed. Check the logs above for errors."
+    echo_info "Common issues:"
+    echo_info "  - Missing project files"
+    echo_info "  - NuGet package restore failures"
+    echo_info "  - .NET SDK issues"
+    exit 1
+}
 
-# Check if SQL schema exists and copy it
-if [ -f "EthGraffitiExplorer.Core/Database/SqlServer_Schema.sql" ]; then
-    cp EthGraffitiExplorer.Core/Database/SqlServer_Schema.sql . || echo_warning "Could not copy SQL schema"
-    echo_success "SQL schema prepared"
-else
-    echo_warning "SQL schema file not found, you may need to create it manually"
-fi
-
-echo_success "Repository prepared"
-
-################################################################################
-# Step 14: Start Services
-################################################################################
-
-echo_info "Step 14: Starting services..."
-
-cd $INSTALL_DIR
-
-# Start services
+echo_info "Starting containers..."
 docker compose up -d
 
 # Wait for services to be healthy
-echo_info "Waiting for services to be ready..."
+echo_info "Waiting for services to be ready (this may take 30-60 seconds)..."
 sleep 30
 
 # Check service status
@@ -903,69 +978,81 @@ docker compose ps
 echo_success "Services started"
 
 ################################################################################
-# Step 15: Initialize Database
+# Step 16: Initialize Database
 ################################################################################
 
-echo_info "Step 15: Initializing databases..."
+echo_info "Step 16: Initializing databases..."
 
 # Wait for SQL Server to be fully ready
-sleep 10
+echo_info "Waiting for SQL Server to be ready..."
+sleep 15
 
-# Run SQL Server initialization
-echo_info "Initializing SQL Server database..."
-docker exec eth-graffiti-sqlserver /opt/mssql-tools/bin/sqlcmd \
-    -S localhost \
-    -U sa \
-    -P "${SQL_PASSWORD}" \
-    -i /docker-entrypoint-initdb.d/schema.sql || echo_warning "SQL Server initialization may need manual intervention"
-
-echo_success "Databases initialized"
-
-################################################################################
-# Step 16: Configure DAppNode Network Access (Safe Connection)
-################################################################################
-
-echo_info "Step 16: Configuring DAppNode network access..."
-
-# Wait for API container to be fully started
-sleep 5
-
-# Try to connect API container to DAppNode network (non-disruptive)
-if docker network ls | grep -q "dncore_network"; then
-    echo_info "Attempting to connect to DAppNode network 'dncore_network'..."
+# Check if SQL Server is healthy
+if docker exec eth-graffiti-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${SQL_PASSWORD}" -Q "SELECT 1" > /dev/null 2>&1; then
+    echo_success "SQL Server is ready"
     
-    # Check if already connected
-    if docker network inspect dncore_network | grep -q "eth-graffiti-api"; then
-        echo_info "API container already connected to DAppNode network"
-    else
-        if docker network connect dncore_network eth-graffiti-api 2>/dev/null; then
-            echo_success "Successfully connected API container to DAppNode network"
-            echo_info "API can now communicate with Lodestar via DAppNode network"
-        else
-            echo_warning "Could not connect to DAppNode network."
-            echo_warning "This is normal if DAppNode uses strict network isolation."
-            echo_info "Using host network access instead (BEACON_RPC_URL: ${BEACON_RPC_URL})"
-        fi
+    # Run schema initialization if it exists
+    if [ -f "$INSTALL_DIR/SqlServer_Schema.sql" ]; then
+        echo_info "Running SQL Server schema initialization..."
+        docker exec eth-graffiti-sqlserver /opt/mssql-tools/bin/sqlcmd \
+            -S localhost \
+            -U sa \
+            -P "${SQL_PASSWORD}" \
+            -i /docker-entrypoint-initdb.d/schema.sql 2>/dev/null || echo_warning "Schema may already exist or will be created by EF migrations"
     fi
 else
-    echo_warning "DAppNode network 'dncore_network' not found"
-    echo_info "Will use direct host access to Lodestar"
+    echo_warning "SQL Server not responding yet. It may still be initializing."
+    echo_info "Check logs with: $INSTALL_DIR/logs.sh sqlserver"
 fi
 
-# Test beacon node connectivity
-echo_info "Testing beacon node connectivity..."
-if docker exec eth-graffiti-api curl -s -f -m 5 "${BEACON_RPC_URL}/eth/v1/node/version" > /dev/null 2>&1; then
-    echo_success "Beacon node is accessible from API container"
+# Trigger EF migrations through API
+echo_info "Triggering database migrations via API..."
+sleep 10
+if docker exec eth-graffiti-api curl -s -f http://localhost:80/health > /dev/null 2>&1; then
+    echo_success "API is responding - migrations should run automatically"
 else
-    echo_warning "Cannot reach beacon node at ${BEACON_RPC_URL}"
-    echo_warning "You may need to adjust the Lodestar RPC URL or network configuration"
-    echo_info "Try these alternatives:"
-    echo_info "  - http://172.33.1.5:9596 (DAppNode internal IP)"
-    echo_info "  - http://lodestar.dappnode:9596 (DAppNode DNS)"
-    echo_info "  - http://host.docker.internal:9596 (Host network)"
+    echo_warning "API not responding yet. Migrations will run on first API start."
 fi
 
-echo_success "Network configuration completed"
+echo_success "Database initialization completed"
+
+################################################################################
+# Step 17: Configure DAppNode Network Access
+################################################################################
+
+if [ "$DAPPNODE_DETECTED" = true ]; then
+    echo_info "Step 17: Configuring DAppNode network access..."
+
+    # Wait for API container to be fully started
+    sleep 5
+
+    # The API container should already be connected via docker-compose
+    # Verify the connection
+    if docker network inspect dncore_network | grep -q "eth-graffiti-api"; then
+        echo_success "API container connected to DAppNode network"
+        echo_info "API can communicate with Lodestar via DAppNode network"
+    else
+        echo_warning "API container not connected to DAppNode network"
+        echo_info "This may be intentional if using host network access"
+    fi
+
+    # Test beacon node connectivity
+    echo_info "Testing beacon node connectivity..."
+    if docker exec eth-graffiti-api curl -s -f -m 5 "${BEACON_RPC_URL}/eth/v1/node/version" > /dev/null 2>&1; then
+        echo_success "Beacon node is accessible from API container"
+    else
+        echo_warning "Cannot reach beacon node at ${BEACON_RPC_URL}"
+        echo_warning "You may need to adjust the Lodestar RPC URL or network configuration"
+        echo_info "Try these alternatives:"
+        echo_info "  - http://172.33.1.5:9596 (DAppNode internal IP)"
+        echo_info "  - http://lodestar.dappnode:9596 (DAppNode DNS)"
+        echo_info "  - http://host.docker.internal:9596 (Host network)"
+    fi
+
+    echo_success "Network configuration completed"
+else
+    echo_info "Step 17: Skipping DAppNode network configuration (not detected)"
+fi
 
 ################################################################################
 # Final Steps and Information
@@ -1000,24 +1087,23 @@ else
         echo ""
         echo_warning "SSL not configured. To add SSL later:"
         echo "  1. Ensure ${DOMAIN_NAME} points to this server"
-        echo "  2. Temporarily stop nginx: docker stop eth-graffiti-nginx"
-        echo "  3. Get certificate: sudo certbot certonly --standalone -d ${DOMAIN_NAME}"
-        echo "  4. Update nginx config and restart: docker restart eth-graffiti-nginx"
+        echo "  2. Run: $INSTALL_DIR/setup-ssl.sh"
     fi
 fi
 echo ""
 echo_info "Database Connections (localhost only):"
-echo "  MongoDB: mongodb://admin:${MONGO_PASSWORD}@localhost:27017"
-echo "  SQL Server: Server=localhost;User=sa;Password=${SQL_PASSWORD}"
+echo "  MongoDB: mongodb://admin:***@localhost:27017"
+echo "  SQL Server: Server=localhost;User=sa;Password=***"
 echo ""
 echo_info "Beacon Node Connection:"
 echo "  URL: ${BEACON_RPC_URL}"
 echo ""
 echo_warning "Next Steps:"
-echo "  1. Verify Lodestar beacon node is accessible at ${BEACON_RPC_URL}"
-echo "  2. Access the web UI at https://${DOMAIN_NAME}"
-echo "  3. Trigger initial sync: curl -X POST https://${DOMAIN_NAME}/api/beacon/sync"
-echo "  4. Monitor logs: ${INSTALL_DIR}/logs.sh"
+echo "  1. Verify services are running: ${INSTALL_DIR}/status.sh"
+echo "  2. Check API health: curl http://localhost:5000/health"
+echo "  3. Access the web UI in your browser"
+echo "  4. Trigger initial sync: curl -X POST http://localhost:5000/api/beacon/sync"
+echo "  5. Monitor logs: ${INSTALL_DIR}/logs.sh"
 echo ""
 echo_info "Data is stored in: ${DATA_DIR}"
 echo_info "Configuration is in: ${INSTALL_DIR}"

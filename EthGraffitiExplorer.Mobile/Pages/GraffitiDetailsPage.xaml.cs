@@ -6,7 +6,7 @@ using EthGraffitiExplorer.Mobile.Services;
 namespace EthGraffitiExplorer.Mobile.Pages;
 
 [QueryProperty(nameof(GraffitiId), "id")]
-public partial class GraffitiDetailsPage : ContentPage, INotifyPropertyChanged
+public partial class GraffitiDetailsPage : INotifyPropertyChanged
 {
     private readonly GraffitiApiService _apiService;
     private bool _isLoading;
@@ -38,7 +38,7 @@ public partial class GraffitiDetailsPage : ContentPage, INotifyPropertyChanged
         {
             _graffiti = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(IsLoaded));
+            OnPropertyChanged(nameof(IsDataLoaded));
         }
     }
 
@@ -49,11 +49,11 @@ public partial class GraffitiDetailsPage : ContentPage, INotifyPropertyChanged
         {
             _isLoading = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(IsLoaded));
+            OnPropertyChanged(nameof(IsDataLoaded));
         }
     }
 
-    public bool IsLoaded => !IsLoading && Graffiti != null;
+    public bool IsDataLoaded => !IsLoading && Graffiti != null;
 
     private async void LoadGraffiti()
     {
