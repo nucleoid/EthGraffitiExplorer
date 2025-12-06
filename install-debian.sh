@@ -162,9 +162,9 @@ if command -v ufw &> /dev/null; then
         # Allow SSH (if not already allowed)
         ufw allow 22/tcp 2>/dev/null || true
         
-        # Allow HTTP and HTTPS
-        ufw allow 80/tcp 2>/dev/null || true
-        ufw allow 443/tcp 2>/dev/null || true
+        # Allow HTTP and HTTPS (on alternate ports)
+        ufw allow 8080/tcp 2>/dev/null || true
+        ufw allow 8443/tcp 2>/dev/null || true
         
         echo_success "Firewall rules added (not enabled to avoid disrupting validator)"
         echo_warning "To enable: sudo ufw enable"
@@ -539,8 +539,8 @@ services:
     container_name: eth-graffiti-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:80"
+      - "8443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx-site.conf:/etc/nginx/conf.d/default.conf:ro
@@ -905,15 +905,17 @@ if [ ! -z "$DOMAIN_NAME" ] && [ ! -z "$SSL_EMAIL" ]; then
             echo_success "SSL certificate obtained via webroot method"
         else
             echo_warning "Webroot method failed. Trying standalone method..."
-            echo_info "This requires stopping the service using port 80..."
+            echo_info "This requires port 80 to be available (certbot requirement)..."
             
-            # Find and stop the service using port 80
-            PORT80_CONTAINER=$(docker ps --format '{{.Names}}' | xargs -I {} sh -c 'docker port {} 2>/dev/null | grep -q "^80/tcp" && echo {}' | head -1)
-            
-            if [ ! -z "$PORT80_CONTAINER" ]; then
-                echo_info "Temporarily stopping container: $PORT80_CONTAINER"
-                docker stop $PORT80_CONTAINER
-                
+            # Check if port 80 is available
+            if ss -tuln | grep -q ":80 "; then
+                echo_warning "Port 80 is in use. You'll need to obtain SSL certificate manually."
+                echo_info "Manual SSL certificate setup:"
+                echo_info "  1. Temporarily stop the service using port 80"
+                echo_info "  2. Run: sudo certbot certonly --standalone -d ${DOMAIN_NAME}"
+                echo_info "  3. Restart your services"
+                echo_info "  4. Update nginx configuration to use SSL"
+            else
                 # Try standalone method
                 if certbot certonly --standalone \
                     --non-interactive \
@@ -923,17 +925,9 @@ if [ ! -z "$DOMAIN_NAME" ] && [ ! -z "$SSL_EMAIL" ]; then
                     echo_success "SSL certificate obtained via standalone method"
                 else
                     echo_error "SSL certificate generation failed"
+                    echo_info "You can try manually:"
+                    echo_info "  sudo certbot certonly --standalone -d ${DOMAIN_NAME}"
                 fi
-                
-                # Restart the container
-                echo_info "Restarting container: $PORT80_CONTAINER"
-                docker start $PORT80_CONTAINER
-            else
-                echo_warning "Could not obtain SSL certificate automatically"
-                echo_info "You can try manually:"
-                echo_info "  sudo systemctl stop nginx  # or your web server"
-                echo_info "  sudo certbot certonly --standalone -d ${DOMAIN_NAME}"
-                echo_info "  sudo systemctl start nginx"
             fi
         fi
     fi
@@ -1077,14 +1071,14 @@ echo "  Backup:  ${INSTALL_DIR}/backup.sh"
 echo ""
 echo_info "Service URLs:"
 if [ -d "/etc/letsencrypt/live/${DOMAIN_NAME}" ] && [ ! -z "$DOMAIN_NAME" ]; then
-    echo "  Web UI:  https://${DOMAIN_NAME}"
-    echo "  API:     https://${DOMAIN_NAME}/api"
-    echo "  Swagger: https://${DOMAIN_NAME}/swagger"
+    echo "  Web UI:  https://${DOMAIN_NAME}:8443"
+    echo "  API:     https://${DOMAIN_NAME}:8443/api"
+    echo "  Swagger: https://${DOMAIN_NAME}:8443/swagger"
 else
     SERVER_IP=$(hostname -I | awk '{print $1}')
-    echo "  Web UI:  http://${SERVER_IP} (or http://localhost)"
-    echo "  API:     http://${SERVER_IP}/api"
-    echo "  Swagger: http://${SERVER_IP}/swagger"
+    echo "  Web UI:  http://${SERVER_IP}:8080 (or http://localhost:8080)"
+    echo "  API:     http://${SERVER_IP}:8080/api"
+    echo "  Swagger: http://${SERVER_IP}:8080/swagger"
     if [ ! -z "$DOMAIN_NAME" ]; then
         echo ""
         echo_warning "SSL not configured. To add SSL later:"
@@ -1102,9 +1096,9 @@ echo "  URL: ${BEACON_RPC_URL}"
 echo ""
 echo_warning "Next Steps:"
 echo "  1. Verify services are running: ${INSTALL_DIR}/status.sh"
-echo "  2. Check API health: curl http://localhost:5000/health"
-echo "  3. Access the web UI in your browser"
-echo "  4. Trigger initial sync: curl -X POST http://localhost:5000/api/beacon/sync"
+echo "  2. Check API health: curl http://localhost:8080/health"
+echo "  3. Access the web UI in your browser at http://localhost:8080"
+echo "  4. Trigger initial sync: curl -X POST http://localhost:8080/api/beacon/sync"
 echo "  5. Monitor logs: ${INSTALL_DIR}/logs.sh"
 echo ""
 echo_info "Data is stored in: ${DATA_DIR}"
