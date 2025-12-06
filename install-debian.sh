@@ -479,7 +479,7 @@ services:
     networks:
       - eth-graffiti-net
     healthcheck:
-      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "\${MSSQL_SA_PASSWORD}" -Q "SELECT 1" -C || exit 1
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "${SQL_PASSWORD}" -Q "SELECT 1" -C || exit 1
       interval: 10s
       timeout: 10s
       retries: 10
@@ -829,7 +829,7 @@ docker exec eth-graffiti-mongodb mongodump --out=/tmp/backup --quiet
 docker cp eth-graffiti-mongodb:/tmp/backup \$BACKUP_DIR/mongodb_\$TIMESTAMP
 
 echo "Backing up SQL Server..."
-docker exec eth-graffiti-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${SQL_PASSWORD}" -Q "BACKUP DATABASE EthGraffitiExplorer TO DISK = '/tmp/backup.bak'"
+docker exec eth-graffiti-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "${SQL_PASSWORD}" -Q "BACKUP DATABASE EthGraffitiExplorer TO DISK = '/tmp/backup.bak'" -C
 docker cp eth-graffiti-sqlserver:/tmp/backup.bak \$BACKUP_DIR/sqlserver_\$TIMESTAMP.bak
 
 echo "Backup completed: \$BACKUP_DIR"
