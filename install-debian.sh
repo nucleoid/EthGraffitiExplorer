@@ -989,17 +989,18 @@ echo_info "Waiting for SQL Server to be ready..."
 sleep 15
 
 # Check if SQL Server is healthy
-if docker exec eth-graffiti-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${SQL_PASSWORD}" -Q "SELECT 1" > /dev/null 2>&1; then
+if docker exec eth-graffiti-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "${SQL_PASSWORD}" -Q "SELECT 1" -C > /dev/null 2>&1; then
     echo_success "SQL Server is ready"
     
     # Run schema initialization if it exists
     if [ -f "$INSTALL_DIR/SqlServer_Schema.sql" ]; then
         echo_info "Running SQL Server schema initialization..."
-        docker exec eth-graffiti-sqlserver /opt/mssql-tools/bin/sqlcmd \
+        docker exec eth-graffiti-sqlserver /opt/mssql-tools18/bin/sqlcmd \
             -S localhost \
             -U sa \
             -P "${SQL_PASSWORD}" \
-            -i /docker-entrypoint-initdb.d/schema.sql 2>/dev/null || echo_warning "Schema may already exist or will be created by EF migrations"
+            -i /docker-entrypoint-initdb.d/schema.sql \
+            -C 2>/dev/null || echo_warning "Schema may already exist or will be created by EF migrations"
     fi
 else
     echo_warning "SQL Server not responding yet. It may still be initializing."
